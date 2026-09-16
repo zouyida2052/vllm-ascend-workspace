@@ -65,6 +65,7 @@ Agent 按任务选择工具或技能；执行引用、状态推进和报告由�
 | ------------------------ | ---------------------------------------------- | ------------------ |
 | **modelscope**           | 下载、续传、查看进度并 SHA256 校验 ModelScope 模型权重                  | 需要把模型权重下载到明确目录时 |
 | **vllm-ascend-serving**  | 在远程容器上一键拉起 vLLM Ascend 推理服务，由 coordinator 管理执行和资源 | 需要在远程机器上起推理服务时     |
+| **vllm-ascend-kv-pooling** | 复用远端容器和启动脚本，配置 memcache Meta、A3 standalone、vLLM 并验证外部前缀命中 | “帮我拉一个池化”；优先发现连接和模型配置，只询问无法确定的必要信息 |
 | **vllm-ascend-benchmark** | 在远程容器上运行 `vllm bench serve` 性能基准测试，支持多轮预热和统计聚合     | 需要测量吞吐或延迟时 |
 | **ascend-memory-profiling** | 采集并分析昇腾 NPU 的 HBM 显存占用，按组件拆分并溯源 | 需要分析 vLLM 推理服务的显存占用时 |
 | **ascend-profiling-collection** | 采集 Ascend torch profiler：起服务、控制 profile 窗口、运行 workload、远端 analyse 并写 manifest | 需要采集 kernel_details/trace_view 时 |

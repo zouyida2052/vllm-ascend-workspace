@@ -7,6 +7,10 @@ description: Start, check, or stop a single-node vLLM Ascend service through coo
 
 Start, inspect or stop one managed single-node vLLM Ascend service.
 
+For “帮我拉一个池化” or memcache KV pooling in an existing container, use
+[vllm-ascend-kv-pooling](../vllm-ascend-kv-pooling/SKILL.md), which also starts
+Meta/standalone and validates external prefix hits.
+
 Reuse the native task context and actual business source bindings. Choose model, parallelism and serving options from the request. Resource state and HTTP/models/first-token readiness are separate observations.
 
 ## Agent entry

@@ -33,6 +33,7 @@ repairs use their specific tools and returned facts without repeating these choi
 |---|---|
 | Local files, shell, Git and ordinary PR review | Native tools |
 | Explicit remote endpoint or existing container | remote-dev with host/port/user/cwd and optional container |
+| “帮我拉一个池化” / memcache KV pooling | [vllm-ascend-kv-pooling](.agents/skills/vllm-ascend-kv-pooling/SKILL.md); discover existing settings, start dependencies and validate external prefix hits |
 | Managed environment, NPU run or service | `vaws_run`, `vaws_execution`, `vaws_finish` |
 | Knowledge lookup or capture | `knowledge_query`, `knowledge_explain`, `knowledge_capture` |
 | Local fleet monitor lifecycle | [Monitor commands](docs/npu-fleet-monitor.md) |

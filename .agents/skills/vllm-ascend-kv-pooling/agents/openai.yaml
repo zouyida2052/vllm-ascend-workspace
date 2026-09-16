@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ascend KV 池化"
+  short_description: "发现远端配置，启动 Meta、A3 standalone 与 vLLM 并验证前缀命中"
+  default_prompt: "使用 $vllm-ascend-kv-pooling 帮我拉一个池化，复用当前工作区配置并完成前缀命中验证。"
+policy:
+  allow_implicit_invocation: true

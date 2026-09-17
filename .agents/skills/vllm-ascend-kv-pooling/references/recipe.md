@@ -2,6 +2,8 @@
 
 以下步骤在选定的现有容器中执行。变量由 Agent 根据现场填入；不是要求用户提供的一组参数。
 
+本页描述基础池化。A5 先按 [a5-transports.md](a5-transports.md) 区分 UB 与 UBoE；池化叠加 PD、PP、layerwise 或 SSD 时，按 [pd-ssd.md](pd-ssd.md) 补充组合配置和分层验收。用户只要脚本时不启动服务。
+
 ## 路径、资源及配置
 
 用实际运行 vLLM 的 Python 查 `memcache_hybrid` 安装位置（如 `importlib.util.find_spec` / `pip show`），定位其 `config` 目录，不硬编码 Python 版本。解析而非执行待检查的启动脚本。确认端口属于谁；A3 主机核验所有将使用的 NPU 和 200GB DRAM 可用量。standalone 的 `store.init(0)` 使用可见设备 0，须把该设备也纳入占用检查，不能只检查 vLLM 使用的设备。
@@ -25,7 +27,7 @@ Meta IP 必须是 standalone、scheduler 和 worker 均可达的地址。host �
 | mmc-local.conf | ock.mmc.local_service.dram.size | 0GB |
 | mmc-local.conf | ock.mmc.local_service.max.dram.size | 1024GB |
 
-5000/6000 为缺少现有约定时的配方端口；已有明确端口则一致沿用。其他硬件场景若没有 standalone，不能把承载存储的 local service DRAM 也设为 0；采用已验证硬件配方，不泛化 A3 的 `device_sdma`。
+5000/6000 为缺少现有约定时的配方端口；已有明确端口则一致沿用。上表仅适用于 A3；A5 跳过 standalone，local 使用 `device_urma` 并按进程分配整机 DRAM，详见 [a5.md](a5.md)。其他无 standalone 场景也不能把承载存储的 local service DRAM 设为 0。
 
 ## 启动顺序和验收
 
@@ -69,7 +71,9 @@ ASCEND_RT_VISIBLE_DEVICES=明确的设备列表
 
 ## AISBench 前缀验证
 
-读取现有工具目录中的 README、config、命令构造及结果保存代码。若工具不在目标中，可从用户工作区传输该目录；没有可用副本时报告缺失，不凭空声称已测。
+读取现有工具目录中的 README、config、命令构造及结果保存代码。若工具不在目标中，可从用户工作区传输该目录；没有可用副本时报告缺失，不凭空声称已测。传输按依赖而非仅按代码后缀选择：这版生成器需要 `GSM8K.jsonl`，只传 `.py/.json` 会漏掉 `.jsonl`。核对数据文件可读且非空、tokenizer 可加载；从工具目录运行相对路径依赖。采样状态文件 `picked_ids.txt` 的保留或重置由本轮隔离方案决定，不把它误当作模型依赖。
+
+在唯一 run 目录中复制工具、设置数据和输出目录，保存实际命令及 config。备份被改写的 AISBench 共享链接，结束或异常时恢复原链接/文件；旧结果留在独立 attempt 目录，重试不覆盖日志，也不能把旧 CSV 当作新成功结果。
 
 自动填写 `config.py`：
 
@@ -96,8 +100,12 @@ python3 aisbench_test.py --input_len 8192 --output_len 1 --data_num 4 \
 
 这版工具的 `--dp` 同时控制预热条数/并发，不改变 vLLM DP。已验证的 `write_data` 会循环补足条数，因此 DP2 也能生成 4 条完全重复的正式数据。核对生成文件的实际条数；已明确传入 `--dp 4` 时保持原命令，不把服务改成 DP4。
 
-先取指标快照，再预热，随后取新的快照并正式测试。以**正式测试前后差值**计算 `external_hits / external_queries`，同时查看每个 engine 的指标；缺失指标或分母为 0 表示无法验证，不能宣称 100%。关闭 HBM prefix cache 时 HBM 指标可能为 0/0，这是正常的独立指标。
+先取指标快照，再预热，随后取新的快照并正式测试。记录预热前、预热后/正式前、正式后三个边界的原始指标；若现有脚本只打印阶段差值，也保存该完整日志并明确原始快照的覆盖范围。以**正式测试前后差值**计算 `sum(external_hits) / sum(external_queries)`，不平均各域百分比，也不把 ALL_PODS 汇总行再累加一次。计数回退或服务重启时这一段差值无效。部分 engine 分母为 0 表示本阶段无请求，不计作 0% 的失败；所有分母均为 0 或指标缺失则无法验证。关闭 HBM prefix cache 时 HBM 指标可能为 0/0，这是独立指标。
 
 `subprocess.run(..., shell=True, check=True)` 若执行的是 `ais_bench | tee`，退出码可能只来自 tee；必须核对 aisbench 错误、失败请求、结果文件、预热和正式测试各自完成情况。CSV 的 `99999` TPOT 是工具占位值，1-token 测试没有可解释的 TPOT。`--npu_num` 默认可能为 1，未设置真实数量时不要展示 CSV 的“单卡吞吐”。
 
 聊天模板会使服务端实际输入超过 8192。一次验证中，每请求输入 8275、external hits 8192，整体命中为 99.00%；这说明输入口径不同，不应为凑足 100% 修改请求。若正式测试成功但没有外部命中，说明 serving 可用但池化验证未通过，继续检查 connector 的存取日志和计数。
+
+用户要求“完整输入 N token”时，按当前模型的模板/tokenizer 校准正文长度，并以服务端 usage、AISBench 实际输入及查询计数核对；不能把一次观察到的模板开销 83 固定到其他模型。精确边界与略超边界可能命中不同长度，不将历史测试结果套用成通用公式。
+
+验收同时保留：安装版本和必要 diff、容器创建参数（如本次创建）、生效配置及备份、进程身份、各阶段成功/失败数、实际 token 数、各域及总命中差值、最终健康状态。真实生成失败时即使 `/health` 曾返回 200 也不启动评测。新池首次预热 0 命中可以正常；正式测试必须有成功请求和正的外部命中，且日志无未解决的加载/存储错误，才能报告池化通过。若启用加载失败后重算策略，仅请求成功不足以证明池化加载成功。

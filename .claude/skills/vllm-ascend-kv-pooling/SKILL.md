@@ -1,6 +1,6 @@
 ---
 name: "vllm-ascend-kv-pooling"
-description: "在 Ascend 现有远端容器中启动 memcache KV 池化，配置 Meta、A3 standalone、vLLM AscendStoreConnector，并用 AISBench 验证外部前缀命中。用于“帮我拉一个池化”“起池化服务”“跑一把池化前缀测试”；不用于普通无池化服务、PD 分离或显存归因。"
+description: "在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 standalone、A5 UB/UBoE、SSD 三级池化及叠加 PD 分离，并用 AISBench 验证前缀命中。用于“帮我拉一个池化”、池化启动脚本和池化＋PD；普通无池化 PD 使用 pd-serving，显存归因使用对应技能。"
 ---
 
 <!-- Generated from .agents/skills/vllm-ascend-kv-pooling/SKILL.md. Do not edit. -->

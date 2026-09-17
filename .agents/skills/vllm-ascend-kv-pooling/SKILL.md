@@ -1,11 +1,13 @@
 ---
 name: vllm-ascend-kv-pooling
-description: 在 Ascend 现有远端容器中启动 memcache KV 池化，配置 Meta、A3 standalone、vLLM AscendStoreConnector，并用 AISBench 验证外部前缀命中。用于“帮我拉一个池化”“起池化服务”“跑一把池化前缀测试”；不用于普通无池化服务、PD 分离或显存归因。
+description: 在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 standalone、A5 UB/UBoE、SSD 三级池化及叠加 PD 分离，并用 AISBench 验证前缀命中。用于“帮我拉一个池化”、池化启动脚本和池化＋PD；普通无池化 PD 使用 pd-serving，显存归因使用对应技能。
 ---
 
 # vLLM Ascend KV 池化
 
-把“帮我拉一个池化”执行到可用服务和前缀命中验证。默认使用现有容器、源码安装和启动脚本；完成后保留 Meta、standalone 和 vLLM 运行。用户只要启动、不要评测时，以健康检查和一个实际请求结束。
+把“帮我拉一个池化”执行到可用服务和前缀命中验证。默认复用现有容器、实际安装（editable 或镜像包）和启动脚本；完成后保留本任务的 Meta、适用时的 standalone 和 vLLM 运行。用户只要启动、不要评测时，以健康检查和一个实际请求结束。
+
+用户只要整理脚本时，交付配置、proxy、启动顺序和检查入口，不擅自启动服务。A5 协议先读 [UB/UBoE 与官方来源](references/a5-transports.md)；涉及 PD、PP、layerwise 或 SSD 时再读 [PD 与三级池化](references/pd-ssd.md)。池化＋PD 由本技能负责组合配置；服务编排可复用可用的 pd-serving 技能，不强制重建用户已经可用的容器或工作区。
 
 ## 必要信息与发现顺序
 
@@ -22,13 +24,13 @@ description: 在 Ascend 现有远端容器中启动 memcache KV 池化，配置 
 
 缺失项一次简短询问，例如“请提供主机、容器、工作目录；若已有工作区连接配置，只需补缺失项。”不让用户重写配置步骤、命令、库安装位置。无启动脚本时，获取模型和资源约束，再按实际环境组成启动命令；不要猜测大模型并行度。
 
-默认池化后端是 memcache；A3 standalone DRAM 为 `200GB`，vLLM 客户端 DRAM 为 `0GB`，双方 max DRAM 为 `1024GB`。这些是本流程默认值，不覆盖用户的明确容量要求。其他硬件不能直接照搬 A3 的设备 SDMA 配方，按已验证配置选择协议和容量。
+默认池化后端是 memcache，池总 DRAM 为 `200GB`，max DRAM 配置为 `1024GB`，用户明确要求优先。A3 使用 `device_sdma`：standalone 承载容量，vLLM 客户端 `0GB`。A5 跳过 standalone，由 worker 承载容量；UB 使用 `device_urma`，明确 UBoE 时使用 `device_uboe`，不能只凭 A5 型号选协议。`dram.size` 是每个存储进程的分配量，整机 200GB、8 个存储 worker 时每个设 `25GB`。按实际存储进程数和对齐后容量核算总量，不把 DP 数直接当作进程数。多机区分每机容量与集群总量；用户只说“200GB”且作用域不明时先澄清。A5 的详细预检与已验证条件见 [a5.md](references/a5.md)。
 
 ## 执行
 
-1. **解析并核验目标。** 对用户指定的现有容器使用 remote-dev 的显式 `host/port/user/container/cwd` 入口，复用返回的容器 ID 和 job 引用。不要为此创建第二个容器或强制 coordinator 绑定、源码同步、重装 editable 包。若远端工具不可用，可通过已配置的 SSH 和 Docker 执行同一目标，使用安全的脚本/字节传输及记录的 PID；不要在工具缺失时转而重配整套工作区。
+1. **解析并核验目标。** 对用户指定的现有容器使用 remote-dev 的显式 `host/port/user/container/cwd` 入口，复用返回的容器 ID 和 job 引用。默认不另建容器或强制 coordinator 绑定、源码同步、重装 editable 包；用户已授权创建/修复时按硬件指南完成，不重复询问。指定容器未运行时查全部容器及退出原因，不替换成另一业务容器。若远端工具不可用，可通过已配置的 SSH 和 Docker 执行同一目标，使用安全的脚本/字节传输及记录的 PID；不要在工具缺失时转而重配整套工作区。
 2. **一次预检。** 查看源码实际导入路径和版本、硬件/目标设备占用、主机可用 DRAM、容器 `/dev/shm`、监听端口、memcache 配置目录、权重完整性、aisbench 安装位置与脚本。检查现有启动脚本中的设备变量、模型路径及 TP/DP，修复有证据的明显配置错误。优先复用已就绪且配置匹配的本任务服务，不能仅因名字/端口相同就接管其他服务。
-3. **准备配置与顺序启动。** 读取 [recipe.md](references/recipe.md)，备份将修改的文件，启动 Meta → A3 standalone → vLLM。每层通过其自身检查后再依赖它。为服务分别记录命令、环境中的非敏感必要项、PID/job、日志路径。不要仅凭进程存在判定就绪。
+3. **准备配置与顺序启动。** 读取 [recipe.md](references/recipe.md)，A5 另读 [a5.md](references/a5.md)。备份配置；A3 顺序为 Meta → standalone → vLLM，A5 为 Meta → vLLM。每层通过其自身检查后再依赖它。为服务分别记录命令、环境中的非敏感必要项、PID/job、日志路径。不要仅凭进程存在判定就绪。
 4. **验证 vLLM。** `/health` 返回 200、`/v1/models` 返回实际模型名，并发一个 `temperature=0,max_tokens=1` 的请求确认生成成功。查看池化连接配置与初始化日志，随后用命中指标验证实际 KV 复用。
 5. **默认运行前缀验证。** 使用现有 `aisbench_auto_tools_prefix`；自动填 `config.py`，默认运行 8192/1、4 条、并发 1、重复率 1.0 的预热和正式测试，详见 recipe。未指定评测 `--dp` 时取服务真实 DP；已明确指定则保留并解释差异。用户给出的精确命令优先。
 6. **收尾。** 同时检查 AISBench 实际成功/失败数、正式结果、评测前后的 external hit/query 增量和最终服务健康。归档结果与日志，报告未完成阶段和原因，不能把“已发起”当成“通过”。服务按默认保留；只停止本次失败启动中确认拥有的残留进程，不能批量杀 Python/vLLM 或其他服务。
@@ -37,7 +39,7 @@ description: 在 Ascend 现有远端容器中启动 memcache KV 池化，配置 
 
 ## 保存下次可复用的信息
 
-成功后更新**当前工作区** `.vaws-local/kv-pooling/profile.json`，保存主机/容器选择器、远端根目录、解释器、启动脚本、硬件、模型路径、设备、真实 TP/DP、服务端口、池化容量、验证时间及结果路径。运行记录放本地 `.vaws-local/kv-pooling/runs/` 和远端工作目录的独立 run 目录；原有明确输出约定也可保留。
+成功后更新**当前工作区** `.vaws-local/kv-pooling/profile.json`，保存主机/容器选择器及 ID、远端根目录、解释器、实际镜像/安装版本、启动脚本、硬件、模型路径、设备、真实 TP/DP、服务端口、协议、是否有 standalone、每进程及总池容量、验证时间及结果路径。切换机器前备份旧 profile，清除失效的 standalone 设备、路径及环境修复提示。只沿用有依据的用户目录习惯，不把某次日期路径作为通用默认值。运行记录放本地 `.vaws-local/kv-pooling/runs/` 和远端工作目录的独立 run 目录；原有明确输出约定也可保留。
 
 不要存密码、密钥内容或临时 token；共享技能不存私人 IP、用户名和绝对机器路径。再次请求先验证 profile 仍适用；已经存在的匹配健康池化默认复用并报告，而不是再起一套。用户请求重启时，停止依赖服务须先于其 Meta/standalone。
 

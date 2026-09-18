@@ -63,7 +63,7 @@ ASCEND_RT_VISIBLE_DEVICES=明确的设备列表
 --kv-transfer-config '{"kv_connector":"AscendStoreConnector","kv_role":"kv_both","kv_load_failure_policy":"recompute","kv_connector_extra_config":{"lookup_rpc_port":"0","backend":"memcache"}}'
 ```
 
-上面是已验证 connector 配方；已有合法等价配置可保留。`lookup_rpc_port=0` 是此版本自动分配方式，不保证所有版本支持。
+上面是已验证 connector 配方；已有合法等价配置可保留。当前实现的 `lookup_rpc_port="0"` 用于带 DP rank 的 IPC 路径命名，不是 TCP 自动分配端口；其他版本按实际实现核对。
 
 已验证的 DeepSeek-V4 hybrid 场景还使用 `--no-disable-hybrid-kv-cache-manager --no-enable-prefix-caching`，目的是在关闭 HBM prefix cache 的情况下验证外部池化；不要因测试名含 prefix 就反向打开 HBM prefix cache。其他模型保留其适用配置。
 

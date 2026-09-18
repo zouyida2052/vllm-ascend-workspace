@@ -45,11 +45,11 @@ HIXL §3.1.1 的显式协议方式允许自动生成相应 Endpoint；§3.1.2 �
 
 HCCL/GLOO/TP 的宿主机 NIC、`VLLM_HOST_IP`、Meta TCP 地址与 NPU UBoE bond IP 不是同一个概念。不要把宿主机 IP 直接写成 Device Endpoint。用 `hccn_tool -g -dev_info -i <device_id>` 检查链路与 bond 信息；它只能证明配置/链路状态，不能替代两端传输验证。
 
-协议修订同时修改环境文件、参数入口、配置生成器和生成后的 `mmc-local.conf`，防止启动时覆盖回旧协议。生成配置后检查两端相同目标协议；SSD 容量、盘路径、Meta 地址不因这个变更自动改变。
+协议修订同步修改实际启动脚本与 MMC 配置；只有已有生成器时才同步其输入，避免下次覆盖回旧协议。不为此额外拆文件。检查两端目标协议；SSD 容量、盘路径、Meta 地址不因这个变更自动改变。
 
 ## MemCache 文档中的条件性操作
 
 - 文档列出宿主机关闭自定义算子验签的前置操作。这是主机安全设置变化，不作为每次起池化的隐式步骤。先确认现场镜像/驱动要求和已有状态；需要改变时明确说明影响并取得对应授权，不把阅读文档当作执行授权。
 - `device_urma` 出现 `AclrtSynchronizeStream ... 507018`，且 plog 同时指向 `libcann_hybm_kernel.so` / `HybmBatchWrite` 时，文档建议在推理前执行 `python -c "import memfabric_hybrid"`。保留这些触发条件；不能把任何 507018 或 UBoE 失败都归为同一问题。
 
-这些资料是有出处的配置依据，不是本机实测结果。当前 UBoE＋PD＋PP＋layerwise＋SSD 脚本曾完成语法/配置检查，尚不能据此标记端到端传输或 SSD 命中通过。
+这些资料是有出处的配置依据，现场功能证据另见 [PD 与 SSD](pd-ssd.md)：950DT、P DP2/PP2、D DP4/PP1 已完成小样本代理生成与外部前缀复用验证；两端 SSD 已启用，但 SSD 写入和回读尚未验证。

@@ -1,81 +1,127 @@
-# PD 分离叠加池化、PP、layerwise 与 SSD
+# PD 分离、PP、layerwise 与 SSD 池化
 
-## 从现有框架生成脚本
+## 精简脚本结构
 
-先读用户工作区实际版本的模型部署文档、PD 文档、已有 `run_server.sh` 与 proxy 实现；核对 Python 实际导入路径。editable vLLM 不代表 vllm-ascend 也 editable。不要照搬文档中的模型路径、量化、网卡、示例 IP、DP/TP 元数据；FP8 权重不能沿用 W8A8 示例的 `--quantization ascend`。保留用户图模式/MTP选择，故障时不静默切换 eager。
+复用现场已工作的脚本、安装路径与拓扑。仅整理脚本时不启动服务；一次性发现、检查和源码修复由 Agent 完成，不塞进每次启动命令。
 
-发现或补齐：P/D 主机与容器、模型、物理设备、DP/TP/PP、协议、Meta、每机容量、SSD 所在角色/设备、proxy 所在节点。SSD 只放 P 是一种部署选择，不是必需规则。能从用户指令和现有配置取得的内容不要重复询问。
+| 文件 | 职责 |
+| --- | --- |
+| run_server.sh | 环境变量、直接填写参数的 vllm serve、内联 KV JSON、双路日志 |
+| local.conf | 本节点协议、DRAM、SSD |
+| meta.conf、run_meta.sh | Meta 配置与启动；明确配置是实际加载文件还是安装目录副本 |
+| run_proxy.sh、proxy.py | 直接启动对应代理，仅代理节点需要 |
+| README.md | 简短顺序、拓扑与源码前提 |
 
-用户要求所有脚本位于 `scripts/` 时，每端交付同目录的参数、环境、配置生成器、MMC 配置、KV JSON、服务启动、proxy 副本和检查脚本；日志、PID和备份也在其子目录。入口解析脚本自身目录，不能依赖调用者 cwd。原脚本先备份，修改文件用 UTF-8/LF。不要额外创建另一套隐藏启动目录。
+本次精简模式不再拆 config.env、env.sh、KV JSON、配置生成器、补丁应用、健康检查或总启动器。参数直接填写，不先命名再传参。已有自动化按用户需求保留；评测工具放在 scripts 之外。修改脚本不自动重启服务。
 
-推荐文件职责：`config.env` 保存参数；`env.sh` 加载环境并导出 MMC 路径；`prepare_pool.py` 从当前安装包模板生成私有 MMC 配置；`run_meta.sh`、`run_server.sh`、`run_proxy.sh` 分别启动；`start.sh` 可提供后台日志/PID；`check.sh`、`run_smoke.sh` 验证健康与真实请求。文件名不是强制接口，优先延用用户框架。
+Meta 只需两行；交付时将路径直接替换为实际安装路径，不照搬其他镜像的 Python 版本：
 
-## 并行度与 connector
-
-八卡示例：P 为 DP4×TP1×PP2，D 为 DP8×TP1×PP1。这个组合仅是已准备配置示例，不是已验证性能或可启动保证。所检查版本的 MooncakeHybridConnector 明确限制 Decode PP=1；换版本重新看源码。存储 worker 数必须由日志核实，不能只按 DP 数计算，PP rank 也可能承载存储。
-
-两端 `MultiConnector` 的子 connector 都使用该端角色：P `kv_producer`、D `kv_consumer`。组合结构：
-
-```json
-{
-  "kv_connector": "MultiConnector",
-  "kv_role": "kv_producer",
-  "kv_connector_extra_config": {
-    "connectors": [
-      {
-        "kv_connector": "MooncakeHybridConnector",
-        "kv_role": "kv_producer",
-        "kv_buffer_device": "npu",
-        "kv_port": "23001",
-        "kv_connector_extra_config": {
-          "prefill": {"dp_size": 4, "tp_size": 1, "pp_size": 2},
-          "decode": {"dp_size": 8, "tp_size": 1, "pp_size": 1}
-        }
-      },
-      {
-        "kv_connector": "AscendStoreConnector",
-        "kv_role": "kv_producer",
-        "kv_connector_extra_config": {
-          "backend": "memcache",
-          "lookup_rpc_port": "0",
-          "use_layerwise": true
-        }
-      }
-    ]
-  }
-}
+```bash
+export MMC_META_CONFIG_PATH=/ACTUAL/site-packages/memcache_hybrid/config/mmc-meta.conf
+python3 -c 'from memcache_hybrid import MetaService; MetaService.main()'
 ```
 
-D 端替换角色及其 KV 基础端口；两端 prefill/decode 元数据必须一致并匹配真实启动参数。显式 PP 分层时同步 connector 的分层描述，检查模型/MTP支持和 hybrid cache group 对齐。`lookup_rpc_port=0` 是所检查版本的自动分配方式；核对实际版本。
+若采用本地 meta.conf，上面的变量直接指向它，不能只修改副本。Proxy 示例中的 P_IP/D_IP 在交付前直接替换：
 
-这里 layerwise 是 **AscendStoreConnector 池化按层传输**，不是把 PD connector 换成 MooncakeLayerwiseConnector。按 connector 的请求路径选择 proxy：此例复用仓库 `examples/disaggregated_prefill_v1/load_balance_proxy_server_example.py` 的 P→D 实现，并复制到 scripts；别误用 D→P layerwise proxy。端口、CLI 参数、依赖与健康接口以复制版本为准。
+```bash
+python3 -u "$(dirname "$(readlink -f "$0")")/proxy.py" \
+  --host 0.0.0.0 --port 30350 --workers 1 \
+  --prefiller-hosts P_IP --prefiller-ports 30351 \
+  --decoder-hosts D_IP --decoder-ports 30352
+```
 
-一个 API 管理本地 DP 与逐 rank 启动是两种方案。根据用户框架选择一种；不能保留逐 rank 的启动器，再额外启动内部完整 DP，造成重复占卡。文档中的 `--data-parallel-rank/address` 参数只在实际布局需要时保留。协议按 [A5 传输配置](a5-transports.md)，不因叠加 PD 把 UB 当成 UBoE。
+复用实际仓库 `examples/disaggregated_prefill_v1/load_balance_proxy_server_example.py` 的 P→D 实现并核对 CLI，不误用 D→P layerwise proxy。不在启动器加入 curl health、依赖安装或探测。
 
-## SSD 配置与容量
+Server 开头使用 `set -o pipefail`，保留核实的 CANN/ATB 环境、库路径和模型参数；配置文件路径不依赖调用者 cwd：
 
-在承担 SSD 的节点生成：
+```bash
+export MMC_LOCAL_CONFIG_PATH="$(dirname "$(readlink -f "$0")")/local.conf"
+export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3
+```
+
+完整 vllm serve 命令末尾接：
+
+```bash
+  2>&1 | tee "$(dirname "$(readlink -f "$0")")/server.log"
+```
+
+同时打屏和写文件，默认覆盖上次日志；要求追加时用 tee -a。pipefail 避免 tee 成功掩盖服务失败。`VLLM_VERSION` 不能选择运行时版本，本次实际 vLLM 提示未知变量，以导入路径、包版本和启动日志为准。
+
+文件使用 UTF-8、LF；Windows 不通过默认编码的 shell 管道传递中文给 Python。同步核对真实远端路径和内容；要求镜像同步时仅删除明确属于同步范围的旧文件，保留日志和数据。SFTP 显示成功但新目录未变时，核对插件实际加载的 remotePath 与文件哈希，旧路径缓存不等于上传失败。
+
+## 拓扑、通信和源码前提
+
+本次验证组合：Ascend950DT、DeepSeek-V4-Flash，P 为 DP2×TP1×PP2，D 为 DP4×TP1×PP1，各用卡 0–3。这是配套源码与权重条件下的实例，不是任意版本的启动保证。改变 DP 也会影响 EP 分片与每卡权重。
+
+本次 GLOO_SOCKET_IFNAME、TP_SOCKET_IFNAME、HCCL_SOCKET_IFNAME 均为 enp34s0f1；迁移时按实际 NIC 替换。VLLM_HOST_IP、HCCL_IF_IP 填各节点可达地址。宿主 NIC/IP 与 NPU UBoE Endpoint 分开核对，不根据模型目录名判断硬件。
+
+UBoE 见 [协议配方](a5-transports.md)：HIXL 使用 `uboe:device`，MMC 使用 `device_uboe`，分别配置。UB 的 `device_urma` 不能直接当成 UBoE。HCCL 缓冲区、线程数、超时、分配器等沿用适用现场参数，不把单次调优值当通用默认。
+
+P 的内联 JSON 示例：
+
+```json
+{"kv_connector":"MultiConnector","kv_role":"kv_producer","kv_connector_extra_config":{"pool_init_barrier":false,"connectors":[{"kv_connector":"MooncakeHybridConnector","kv_role":"kv_producer","kv_buffer_device":"npu","kv_port":"23001","kv_connector_extra_config":{"use_ascend_direct":true,"prefill":{"dp_size":2,"tp_size":1,"pp_size":2},"decode":{"dp_size":4,"tp_size":1,"pp_size":1}}},{"kv_connector":"AscendStoreConnector","kv_role":"kv_producer","kv_connector_extra_config":{"backend":"memcache","lookup_rpc_port":"0","use_layerwise":true}}]}}
+```
+
+D 将三处角色改为 kv_consumer、KV 端口改为 23002，本次配套实现使用 pool_init_barrier=true。两端 prefill/decode 元数据一致并匹配 CLI。use_ascend_direct 是沿用现场兼容参数，不能仅凭它证明传输路径生效。
+
+- 当前 MooncakeHybridConnector 限制 Decode PP=1；换版本核对源码。
+- 未显式指定 PP 层数时，当前 get_pp_indices 自动划分，43 层、PP2 实际为 22/21。显式划分时同步 connector 布局。
+- 当前 get_zmq_rpc_path_lookup 将 lookup_rpc_port="0" 用于 `ipc://.../lookup_rpc_port_0_dp_rankN`，它是 IPC 名称的一部分，**不是 TCP 自动分配端口**。
+- use_layerwise 指 AscendStoreConnector 按层池化，不代表换成 MooncakeLayerwiseConnector。
+- 本次源码已包含 PP hybrid KV 页布局、池化本地/全局层索引、D 端池初始化 CPU barrier 修复。pool_init_barrier 是配套实现参数，不能当上游通用能力；核对实际导入包，不在启动器重复打补丁。
+- D 请求 FULL_DECODE_ONLY，但日志因 layerwise 异步加载切换为 PIECEWISE。报告实际模式；故障时不静默取消池化或切 eager。
+
+一个 API 管理本地 DP 与逐 rank 启动二选一，避免重复占卡。模型路径、量化、MTP、tokenizer/parser 和编译参数沿用匹配版本，不照搬其他模型示例。
+
+## 两端 SSD 与容量
+
+P、D 都开 SSD 时，两端 local.conf 均配置（磁盘逐机确认）：
 
 ```ini
+ock.mmc.local_service.protocol = device_uboe
+ock.mmc.local_service.dram.size = 25GB
+ock.mmc.local_service.max.dram.size = 1024GB
 ock.mmc.local_service.storage.enabled = true
 ubsio.disk.path = /dev/SELECTED_DEVICE
 ubsio.mem.size_in_gb = 5
-ubsio.standalone.device_count = 8
+ubsio.standalone.device_count = 4
 ubsio.standalone.force_new_disk = false
 ```
 
-`standalone.device_count` 是 UBSIO 的存储进程分配参数，不表示 A5 要启动 standalone 服务。值应等于本节点 DRAM 非零的实际 local-service 进程数。8 是示例，不能原样用于任意 DP/PP 配置。
+两端指向同一 Meta/config store，本例端口 15100/16100，Meta 指标端口 18100；其余配置保留实际安装模板。world_size 不等于实际进程数。
 
-在宿主机按路径和序列号确认 SSD，检查分区、文件系统、挂载、swap、LVM/RAID/holders、现有进程及测试授权。设备能在容器看到、不挂载，都不证明可独占或可擦除。记录容量与健康信息。复用既有 UBSIO 盘保持 `force_new_disk=false`，同时核对旧 device_count/布局；改变进程数不能直接沿用旧布局。新盘初始化或重新分区需单独明确目标及数据用途，不能默认擦盘。
+device_count 对应本节点承载 DRAM 的实际 local-service 进程数，不意味着 A5 要启动 standalone。PP rank 也承载池；本次每端四进程各 25GB，约每机 100GiB、集群 200GiB，另算 UBSIO 和其他内存。
 
-DRAM 按每存储进程分配，设备协议按 1GiB 对齐。8×25GB 表示每机约200GiB，两机均如此则集群约400GiB；另加 UBSIO 内存池、模型及系统内存。为触发 SSD 淘汰可在授权测试配置中缩小 P 的 DRAM（例如每进程1GB），不要用该值静默替代用户生产容量。
+复用已有 UBSIO 盘保持 force_new_disk=false。改变设备数前核对旧布局兼容性，不自动初始化。新盘按路径/序列号、分区、挂载、swap、LVM/RAID/holders 与用途确认；裸盘可见不等于可以擦除。SSD 可在单端或双端，以用户要求为准。
 
-## 启动和验收边界
+## 启动和日志
 
-1. 仅准备脚本：检查 Bash/Python 语法、生成后的 JSON/CONF、两端拓扑与环境一致性，打印真实导入路径。同步按文件核对，保留用户改动；不加载模型、不初始化 SSD，不称启动成功。
-2. 请求启动：预检设备/端口/Meta；Meta → P → D → proxy，每层就绪后启动下层。不终止不属于本部署的进程；后台启动只报告 PID，不冒充 ready。
-3. 基本服务：P/D health、models、经 proxy 的真实生成，确认非空且内容合理。核对 PD 收发日志；HTTP 200 或乱码内容不能证明 KV 传输正确。
-4. 前缀池化：优先 `aisbench_auto_tools_prefix`，保留预热/重放的成功数和 external hit/query 增量。PD 工具参数按真实 P 侧 DP/路由含义核对，不能把卡数当作 DP。
-5. SSD：先写入足够多不同长前缀，使日志出现实际 `evict_to_ssd` 和 SSD 写入；重放早期已淘汰前缀，检查 SSD Get/rewarm、磁盘读取、成功输出和外部命中增量。仅有 DRAM Get 或 external hit 不能证明 SSD 读取。记录 `rewarm_failed`/`get_not_found`；允许重算时仍需证明读取成功，不能用请求成功遮盖回读失败。
+顺序：Meta → P/D → proxy。Agent 按依赖检查就绪，检查不必写进启动器。分别验证 P/D health、models 和经 proxy 的真实非空合理生成；proxy 未实现 health 时 404 不等于故障。PID 或 HTTP 200 单独不足以证明 KV 正确。
 
-硬件层、PD层、DRAM命中、SSD写入、SSD回读分别报告通过/失败/未验证。既往曾出现“external hit 高、但 SSD read 为0、rewarm_failed 增长、输出为空”的失败，不能包装成三级池化成功；底层原因需结合实际日志另行定位。完成后按用户意愿保留服务。交付脚本不能升级成真实组合运行验证。
+mmc-meta.log 用于运行故障、连接、注册和容量信息。mmc-meta-audit.log 在本次版本周期输出 Metrics 汇总；warning 级别汇总本身不代表故障。观察 query、alloc、dram/ssd、evict_to_ssd、rewarm 等实际字段。Get 计数不一定覆盖 query 路径，不能直接当 vLLM 前缀命中率。
+
+## AISBench 接入和验证边界
+
+复用 aisbench_auto_tools_prefix，放在 scripts 旁。config.py 的 HOST_IP/HOST_PORT 指向 **proxy**，POD_INFO 指向 **P 的 metrics 地址**。WORK_PATH 是包含 ais_bench/ 的安装根目录；MODEL_NAME 匹配 served-model-name，MODEL_PATH 指向 tokenizer。仅在模型支持时设置关闭 thinking 的 chat template 参数。
+
+已有隔离 wrapper run_prefix.py 时：
+
+```bash
+python3 run_prefix.py --input_len 8192 --output_len 1 \
+  --data_num 4 --concurrency 1 --request_rate 0 \
+  --dataset_type prefix_cache --repeat_rate 1.0 --prefix_test \
+  --dp 2 --npu_num 8
+```
+
+wrapper 是本次工作区工具，不是 AISBench 自带入口，其他工作区先定位现有工具。dp=2 是 P 的 DP，控制工具预热条数/并发，不是 D 的 DP 或总卡数；npu_num=8 是两端总卡数。两次预热不能保证覆盖两个 DP，核对逐 engine 指标。repeat_rate 是构造输入的共享前缀比例，可设 0.5、0.8、1.0，不是实测命中率。
+
+工具可能改写安装目录模型配置和 gsm8k train/test。复用已有隔离方式：独立 run 目录、共享文件锁、备份原文件/软链并在 finally 恢复，保存正式阶段前后原始 metrics。不能只看 ais_bench 与 tee 管道退出码，还要看真实成功/失败数与输出。
+
+外部命中率为正式阶段 Δexternal_hits/Δexternal_queries，按 P 各 engine 汇总，排除预热、其他流量与计数器重置。禁用 HBM prefix caching 时 HBM 0/0 不代表外部池失效。输出 1 token 不报告 TPOT，四条小样本不作吞吐结论。
+
+2026-09-19 现场：预热 2/2、正式 4/4 成功；external hit/query 增量 32768/32780，约 99.963%，正式平均 TTFT 511.4ms。仅证明该配置的小样本 PD＋外部前缀复用流程可用，不代表准确率或稳定性能评测。
+
+两端 SSD 已启用并注册容量，但当时 SSD 使用量、evict_to_ssd、rewarm 都为 0，**SSD 写入和回读未验证**。完整验证需写入足量不同前缀触发淘汰，再重放早期前缀，联合 SSD 写入/读取、rewarm、失败计数、合理输出和外部命中证据。storageEnabled=1 或 external hit 高不等于 SSD 回读通过。
+
+机器路径、源码版本和原始结果留在当前工作区 profile/run 记录，共享技能不保存私有 IP 和用户目录。

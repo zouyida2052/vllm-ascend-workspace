@@ -7,7 +7,7 @@ description: 在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 
 
 把“帮我拉一个池化”执行到可用服务和前缀命中验证。默认复用现有容器、实际安装（editable 或镜像包）和启动脚本；完成后保留本任务的 Meta、适用时的 standalone 和 vLLM 运行。用户只要启动、不要评测时，以健康检查和一个实际请求结束。
 
-用户只要整理脚本时，交付配置、proxy、启动顺序和检查入口，不擅自启动服务。A5 协议先读 [UB/UBoE 与官方来源](references/a5-transports.md)；涉及 PD、PP、layerwise 或 SSD 时再读 [PD 与三级池化](references/pd-ssd.md)。池化＋PD 由本技能负责组合配置；服务编排可复用可用的 pd-serving 技能，不强制重建用户已经可用的容器或工作区。
+用户只要整理脚本时，交付配置、proxy 和启动顺序，不擅自启动服务。采用精简脚本时，环境变量、直接填写的 CLI 参数和内联 KV JSON 集中到 run_server.sh；Meta 两行启动，proxy 直接传参，server 用 pipefail＋tee 同时打屏和落盘。检查由 Agent 按需执行，不反复塞进启动器。A5 协议先读 [UB/UBoE 与官方来源](references/a5-transports.md)；涉及 PD、PP、layerwise 或 SSD 时读 [PD 与三级池化](references/pd-ssd.md)，其中包含已验证拓扑、源码前提、AISBench 代理入口/P 端指标接入和 SSD 验证边界。池化＋PD 由本技能负责组合配置；服务编排可复用 pd-serving，不强制重建已有容器或工作区。
 
 ## 必要信息与发现顺序
 

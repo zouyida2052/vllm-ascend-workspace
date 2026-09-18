@@ -34,6 +34,8 @@ These facts do not relabel earlier device or performance runs.
 
 ## Versioned evidence
 
+- [SSD pooling acceptance 2026-09-19](ssd-pooling-2026-09-19.md) — DeepSeek-V4-Flash 128K、并发 32、六轮 A/B；Prefill TPS 中位数提升 5.1413 倍，每轮 SSD 占三层实际命中 39.0625%，包含归属方法、版本与换机型限制。原始附件保留在实验工作区；共享仓库保存脱敏摘要。
+
 The [Windows ModelScope follow-up](windows-modelscope-identity-2026-09-13.md)
 retains the original PR 169 failure and its passing rerun, then records
 deterministic identity-failure reproduction, the product correction and the

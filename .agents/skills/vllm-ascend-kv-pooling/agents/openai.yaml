@@ -1,6 +1,6 @@
 interface:
   display_name: "Ascend KV 池化"
-  short_description: "准备或启动 A3/A5 UB/UBoE 池化、PD 与 SSD，并分层验证命中"
+  short_description: "准备 A3/A5 池化与 PD，验证 SSD 分层命中、配对性能及换机型验收"
   default_prompt: "使用 $vllm-ascend-kv-pooling 帮我拉一个池化，复用当前工作区配置并完成前缀命中验证。"
 policy:
   allow_implicit_invocation: true

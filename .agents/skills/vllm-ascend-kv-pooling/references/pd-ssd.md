@@ -1,5 +1,7 @@
 # PD 分离、PP、layerwise 与 SSD 池化
 
+本文的 PP2、layerwise、每 worker 25GB 和末尾小样本结果属于早期启动验证。后续 2026-09-19 正式 SSD 验收改为 P/D 均 DP4/TP1/PP1、use_layerwise=false、每 worker 4GB；并发 32，Prefill TPS 中位数提升 5.1413 倍，三轮 SSD 占三层实际命中均 39.0625%。需要性能验收或换机型复用时读 [SSD 验收方法](ssd-acceptance.md)，不要把两阶段的配置和结果混合。本文 JSON 仍作为 PP2 启动示例保留，不代表最终验收配置。
+
 ## 精简脚本结构
 
 复用现场已工作的脚本、安装路径与拓扑。仅整理脚本时不启动服务；一次性发现、检查和源码修复由 Agent 完成，不塞进每次启动命令。
@@ -122,6 +124,6 @@ wrapper 是本次工作区工具，不是 AISBench 自带入口，其他工作�
 
 2026-09-19 现场：预热 2/2、正式 4/4 成功；external hit/query 增量 32768/32780，约 99.963%，正式平均 TTFT 511.4ms。仅证明该配置的小样本 PD＋外部前缀复用流程可用，不代表准确率或稳定性能评测。
 
-两端 SSD 已启用并注册容量，但当时 SSD 使用量、evict_to_ssd、rewarm 都为 0，**SSD 写入和回读未验证**。完整验证需写入足量不同前缀触发淘汰，再重放早期前缀，联合 SSD 写入/读取、rewarm、失败计数、合理输出和外部命中证据。storageEnabled=1 或 external hit 高不等于 SSD 回读通过。
+早期小样本阶段两端 SSD 已启用并注册容量，但当时 SSD 使用量、evict_to_ssd、rewarm 都为 0，**该阶段未验证 SSD 写入和回读**。后续完整验证已完成，见上述 SSD 验收方法。完整验证需写入足量不同前缀触发淘汰，再重放早期前缀，联合 SSD 写入/读取、rewarm、失败计数、实际成功请求和外部命中证据。storageEnabled=1 或 external hit 高不等于 SSD 回读通过。
 
 机器路径、源码版本和原始结果留在当前工作区 profile/run 记录，共享技能不保存私有 IP 和用户目录。

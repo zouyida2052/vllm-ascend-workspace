@@ -1,6 +1,6 @@
 ---
 name: vllm-ascend-kv-pooling
-description: 在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 standalone、A5 UB/UBoE、SSD 三级池化及叠加 PD 分离，并用 AISBench 验证前缀命中。用于“帮我拉一个池化”、池化启动脚本和池化＋PD；普通无池化 PD 使用 pd-serving，显存归因使用对应技能。
+description: 在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 standalone、A5 UB/UBoE、SSD 三级池化及叠加 PD 分离；用 AISBench 验证前缀命中、SSD 分层归属和配对性能，支持换机型验收。用于池化启动、池化＋PD 和 SSD 验收；普通无池化 PD 使用 pd-serving，显存归因使用对应技能。
 ---
 
 # vLLM Ascend KV 池化
@@ -10,6 +10,8 @@ description: 在 Ascend 容器中准备或启动 memcache KV 池化，支持 A3 
 用户只要整理脚本时，交付配置、proxy 和启动顺序，不擅自启动服务。采用精简脚本时，环境变量、直接填写的 CLI 参数和内联 KV JSON 集中到 run_server.sh；Meta 两行启动，proxy 直接传参，server 用 pipefail＋tee 同时打屏和落盘。检查由 Agent 按需执行，不反复塞进启动器。A5 协议先读 [UB/UBoE 与官方来源](references/a5-transports.md)；涉及 PD、PP、layerwise 或 SSD 时读 [PD 与三级池化](references/pd-ssd.md)，其中包含已验证拓扑、源码前提、AISBench 代理入口/P 端指标接入和 SSD 验证边界。池化＋PD 由本技能负责组合配置；服务编排可复用 pd-serving，不强制重建已有容器或工作区。
 
 ## 必要信息与发现顺序
+
+要求 SSD 实际回读、分层命中占比、128K 性能对比或换机型验收时，读 [SSD 验收与迁移方法](references/ssd-acceptance.md)。该流程区分共享前缀构造比例与实测命中，保留 P→D 传输建立无历史复用基线，以请求级证据区分 DRAM 与 SSD；不能用 external 命中或磁盘注册容量替代 SSD 有效命中。普通启动任务不自动运行完整压测。
 
 优先级：本轮明确要求 > 当前会话已确认事实 > 当前工作区已验证的本地 profile > 现有脚本/连接配置 > 下列默认值。不要把历史示例当成其他工作区的默认服务器。
 
